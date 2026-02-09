@@ -2,37 +2,38 @@ import pandas
 from typing import Optional, List
 import re
 
-OPERATIONS = {
-    "+": lambda c1, c2: c1 + c2,
-    "-": lambda c1, c2: c1 - c2,
-    "*": lambda c1, c2: c1 * c2,
-}
+OPERATIONS = {"+", "-", "*"}
+_OPERATIONS_TO_PARSE = re.compile(
+    "(" + "|".join(re.escape(operator) for operator in OPERATIONS) + ")"
+)
 
-
-def check_column_name(name: str) -> bool:
-    if not all(char.isalpha() or char == "_" for char in name):
+def check_column_name(name: str) -> bool: 
+    if not name or not all(char.isalpha() or char == "_" for char in name):
         return False
+    
     return True
 
 
 def parse_role(role: str) -> Optional[List[str]]:
-    elements = re.split(r'(\+|\-|\*)', role)
-    if len(elements) != 3:
-        return None
-    
+    elements = re.split(_OPERATIONS_TO_PARSE, role)
     elements = [e.strip() for e in elements]
-    
-    first_column, operator, second_column = elements
-    if not check_column_name(first_column) or not check_column_name(second_column):
-        return None
 
-    if operator not in OPERATIONS:
+    if not elements or len(elements) % 2 == 0 or any(e == "" for e in elements):
         return None
     
-    return first_column, operator, second_column
+    for i in range(0, len(elements), 2):
+        if not check_column_name(elements[i]):
+            return None
+
+    for i in range(1, len(elements), 2):
+        if elements[i] not in OPERATIONS:
+            return None
+    
+    return elements
 
 
 def add_virtual_column(df: pandas.DataFrame, role: str, new_column: str) -> pandas.DataFrame:
+    new_column = new_column.strip()
     if not check_column_name(new_column):
         return pandas.DataFrame([])
     
@@ -40,12 +41,16 @@ def add_virtual_column(df: pandas.DataFrame, role: str, new_column: str) -> pand
     if not elements:
         return pandas.DataFrame([])
     
-    first_column, operator, second_column = elements
+    for i in range(0, len(elements), 2):
+        if elements[i] not in df.columns:
+            return pandas.DataFrame([])
 
-    if first_column not in df.columns or second_column not in df.columns:
-        return pandas.DataFrame([])
+    expression = " ".join(elements)
         
     new_df = df.copy()
-    new_df[new_column] = OPERATIONS[operator](new_df[first_column], new_df[second_column])
+    try:
+        new_df[new_column] = new_df.eval(expression, engine="python")
+    except Exception:
+        return pandas.DataFrame([])
 
     return new_df
